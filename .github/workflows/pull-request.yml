@@ -1,0 +1,114 @@
+name: Build Vlint (Pull Request)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build-pr:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 18
+
+      - name: Setup Aftman
+        uses: ok-nick/setup-aftman@v0.3.0
+
+      - name: Install Roblox tools
+        run: aftman install
+
+      - name: Install dependencies
+        run: |
+          npm install
+          wally install
+
+      - name: Build Vlint
+        id: build
+        continue-on-error: true
+        run: |
+          chmod +x build.sh
+          ./build.sh 2>&1 | tee build.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Generate loadstring
+        if: steps.build.outputs.status == '0'
+        id: loadstring
+        run: |
+          URL="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.event.pull_request.head.sha }}/dist/library.lua"
+
+          echo "value=loadstring(game:HttpGet(\"$URL\"))()" >> $GITHUB_OUTPUT
+
+      - name: Comment build result
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require("fs")
+
+            const status = `${{ steps.build.outputs.status }}`
+            const sha = context.payload.pull_request.head.sha
+
+            let body
+
+            if (status === "0") {
+
+              const loadstring = `${{ steps.loadstring.outputs.value }}`
+              const url =
+              `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/dist/library.lua`
+
+              body = [
+                "## ✅ Vlint Build Successful",
+                "",
+                `Built from commit \`${sha.substring(0,7)}\``,
+                "",
+                "### Loadstring",
+                "```lua",
+                loadstring,
+                "```",
+                "",
+                `Built file: [dist/library.lua](${url})`
+              ].join("\n")
+
+            } else {
+
+              let log = ""
+
+              try {
+                log = fs.readFileSync("build.log","utf8")
+              } catch {
+                log = "Unable to read build log"
+              }
+
+              if (log.length > 5000)
+                log = log.substring(log.length - 5000)
+
+              body = [
+                "## ❌ Vlint Build Failed",
+                "",
+                `Failed at commit \`${sha.substring(0,7)}\``,
+                "",
+                "```",
+                log,
+                "```"
+              ].join("\n")
+            }
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            })
