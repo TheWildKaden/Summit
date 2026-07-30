@@ -45,5 +45,11 @@ rokit --version || true
 wally --version || true
 
 echo ""
+echo "adding lune"
+rokit add lune
+echo ""
+lune setup
+
+echo ""
 echo "Restart your Codespace terminal or run:"
 echo "source ~/.bashrc"
