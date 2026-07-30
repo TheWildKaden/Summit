@@ -1,3 +1,4 @@
+--#SOURCE https://github.com/dawid-scripts/Fluent/blob/master/src/Acrylic/init.lua
 local Acrylic = {
 	AcrylicBlur = require(script.AcrylicBlur),
 	CreateAcrylic = require(script.CreateAcrylic),
