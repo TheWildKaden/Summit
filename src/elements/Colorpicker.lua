@@ -1,34 +1,45 @@
-local UserInputService = game:GetService("UserInputService")
-local TouchInputService = game:GetService("TouchInputService")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
+local Creator = require("../modules/Creator")
+local New = Creator.New
+local Tween = Creator.Tween
+
+local cloneref = (cloneref or clonereference or function(instance)
+	return instance
+end)
+
+local UserInputService = cloneref(game:GetService("UserInputService"))
+local TouchInputService = cloneref(game:GetService("TouchInputService"))
+local RunService = cloneref(game:GetService("RunService"))
+local Players = cloneref(game:GetService("Players"))
 
 local RenderStepped = RunService.RenderStepped
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
-local Root = script.Parent.Parent
-local Creator = require(Root.Creator)
+local CreateButton = require("../components/ui/Button").New
+local CreateInput = require("../components/ui/Input").New
 
-local New = Creator.New
-local Components = Root.Components
+local Element = {
+	UICorner = 9,
+	--UIPadding = 8
+}
 
-local Element = {}
-Element.__index = Element
-Element.__type = "Colorpicker"
+local ActiveSlider = nil
 
-function Element:New(Idx, Config)
-	local Library = self.Library
-	assert(Config.Title, "Colorpicker - Missing Title")
-	assert(Config.Default, "AddColorPicker: Missing default value.")
-
+function Element:Colorpicker(Config, Window, WindUI, OnApply)
 	local Colorpicker = {
-		Value = Config.Default,
-		Transparency = Config.Transparency or 0,
-		Type = "Colorpicker",
-		Title = type(Config.Title) == "string" and Config.Title or "Colorpicker",
-		Callback = Config.Callback or function(Color) end,
+		__type = "Colorpicker",
+		Title = Config.Title,
+		Desc = Config.Desc,
+		Default = Config.Value or Config.Default,
+		Callback = Config.Callback,
+		Transparency = Config.Transparency,
+		UIElements = Config.UIElements,
+
+		TextPadding = 10,
 	}
+
+	local Connections = {}
+	local IsTransparency = Colorpicker.Transparency ~= nil
 
 	function Colorpicker:SetHSVFromRGB(Color)
 		local H, S, V = Color3.toHSV(Color)
@@ -37,476 +48,827 @@ function Element:New(Idx, Config)
 		Colorpicker.Vib = V
 	end
 
-	Colorpicker:SetHSVFromRGB(Colorpicker.Value)
+	Colorpicker:SetHSVFromRGB(Colorpicker.Default)
 
-	local ColorpickerFrame = require(Components.Element)(Config.Title, Config.Description, self.Container, true)
+	local ColorpickerModule = require("../components/window/Dialog")
+	local ColorpickerFrame = ColorpickerModule.Create(nil, "Dialog", Window, WindUI, Window.UIElements.Main.Main)
 
-	Colorpicker.SetTitle = ColorpickerFrame.SetTitle
-	Colorpicker.SetDesc = ColorpickerFrame.SetDesc
+	Colorpicker.ColorpickerFrame = ColorpickerFrame
 
-	local DisplayFrameColor = New("Frame", {
-		Size = UDim2.fromScale(1, 1),
-		BackgroundColor3 = Colorpicker.Value,
-		Parent = ColorpickerFrame.Frame,
+	ColorpickerFrame.UIElements.Main.Size = UDim2.new(1, 0, 0, 0)
+
+	--ColorpickerFrame:Close()
+
+	local Hue, Sat, Vib = Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib
+
+	Colorpicker.UIElements.Title = New("TextLabel", {
+		Text = Colorpicker.Title,
+		TextSize = 20,
+		FontFace = Font.new(Creator.Font, Enum.FontWeight.SemiBold),
+		TextXAlignment = "Left",
+		Size = UDim2.new(0, 0, 0, 0),
+		AutomaticSize = "Y",
+		ThemeTag = {
+			TextColor3 = "Text",
+		},
+		BackgroundTransparency = 1,
+		Parent = ColorpickerFrame.UIElements.Main,
 	}, {
-		New("UICorner", {
-			CornerRadius = UDim.new(0, 4),
+		New("UIPadding", {
+			PaddingTop = UDim.new(0, Colorpicker.TextPadding / 2),
+			PaddingLeft = UDim.new(0, Colorpicker.TextPadding / 2),
+			PaddingRight = UDim.new(0, Colorpicker.TextPadding / 2),
+			PaddingBottom = UDim.new(0, Colorpicker.TextPadding / 2),
 		}),
 	})
 
-	local DisplayFrame = New("ImageLabel", {
-		Size = UDim2.fromOffset(26, 26),
-		Position = UDim2.new(1, -10, 0.5, 0),
-		AnchorPoint = Vector2.new(1, 0.5),
-		Parent = ColorpickerFrame.Frame,
+	-- Colorpicker.UIElements.Title:GetPropertyChangedSignal("TextBounds"):Connect(function()
+	--     Colorpicker.UIElements.Title.Size = UDim2.new(1,0,0,Colorpicker.UIElements.Title.TextBounds.Y)
+	-- end)
+
+	local HueDragHolder = New("Frame", {
+		Size = UDim2.new(1, 0, 1, 0),
+		Position = UDim2.new(0, 0, 0, 0),
+		BackgroundTransparency = 1,
+	})
+
+	local SatCursor = New("Frame", {
+		Size = UDim2.new(0, 14, 0, 14),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0, 0),
+		Parent = HueDragHolder,
+		BackgroundColor3 = Colorpicker.Default,
+	}, {
+		New("UIStroke", {
+			Thickness = 2,
+			Transparency = 0.1,
+			ThemeTag = {
+				Color = "Text",
+			},
+		}),
+		New("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+	})
+
+	Colorpicker.UIElements.SatVibMap = New("ImageLabel", {
+		Size = UDim2.fromOffset(160, 182 - 24),
+		Position = UDim2.fromOffset(0, 40 + Colorpicker.TextPadding),
+		Image = "rbxassetid://4155801252",
+		BackgroundColor3 = Color3.fromHSV(Hue, 1, 1),
+		BackgroundTransparency = 0,
+		Parent = ColorpickerFrame.UIElements.Main,
+	}, {
+		New("UICorner", {
+			CornerRadius = UDim.new(0, 8),
+		}),
+		Creator.NewRoundFrame(8, "SquircleOutline", {
+			ThemeTag = {
+				ImageColor3 = "Outline",
+			},
+			Size = UDim2.new(1, 0, 1, 0),
+			ImageTransparency = 0.85,
+			ZIndex = 99999,
+		}, {
+			New("UIGradient", {
+				Rotation = 45,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255)),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0.0, 0.1),
+					NumberSequenceKeypoint.new(0.5, 1),
+					NumberSequenceKeypoint.new(1.0, 0.1),
+				}),
+			}),
+		}),
+
+		SatCursor,
+	})
+
+	Colorpicker.UIElements.Inputs = New("Frame", {
+		AutomaticSize = "XY",
+		Size = UDim2.new(0, 0, 0, 0),
+		Position = UDim2.fromOffset(
+			IsTransparency and 160 + 10 + 10 + 10 + 10 + 10 + 10 + 20 or 160 + 10 + 10 + 10 + 20,
+			40 + Colorpicker.TextPadding
+		),
+		BackgroundTransparency = 1,
+		Parent = ColorpickerFrame.UIElements.Main,
+	}, {
+		New("UIListLayout", {
+			Padding = UDim.new(0, 4),
+			FillDirection = "Vertical",
+		}),
+	})
+
+	--	Colorpicker.UIElements.Inputs.UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	--         Colorpicker.UIElements.Inputs.Size = UDim2.new(0,Colorpicker.UIElements.Inputs.UIListLayout.AbsoluteContentSize.X,0,Colorpicker.UIElements.Inputs.UIListLayout.AbsoluteContentSize.Y)
+	--     end)
+
+	local OldColorFrame = New("Frame", {
+		BackgroundColor3 = Colorpicker.Default,
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = Colorpicker.Transparency,
+	}, {
+		New("UICorner", {
+			CornerRadius = UDim.new(0, 8),
+		}),
+	})
+
+	local OldColorFrameChecker = New("ImageLabel", {
 		Image = "http://www.roblox.com/asset/?id=14204231522",
 		ImageTransparency = 0.45,
 		ScaleType = Enum.ScaleType.Tile,
 		TileSize = UDim2.fromOffset(40, 40),
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(75 + 10, 40 + 182 - 24 + 10 + Colorpicker.TextPadding),
+		Size = UDim2.fromOffset(75, 24),
+		Parent = ColorpickerFrame.UIElements.Main,
 	}, {
 		New("UICorner", {
-			CornerRadius = UDim.new(0, 4),
+			CornerRadius = UDim.new(0, 8),
 		}),
-		DisplayFrameColor,
+		Creator.NewRoundFrame(8, "SquircleOutline", {
+			ThemeTag = {
+				ImageColor3 = "Outline",
+			},
+			Size = UDim2.new(1, 0, 1, 0),
+			ImageTransparency = 0.85,
+			ZIndex = 99999,
+		}, {
+			New("UIGradient", {
+				Rotation = 60,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255)),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0.0, 0.1),
+					NumberSequenceKeypoint.new(0.5, 1),
+					NumberSequenceKeypoint.new(1.0, 0.1),
+				}),
+			}),
+		}),
+		--		New("UIStroke", {
+		--			Thickness = 1,
+		--			Transparency = 0.8,
+		--			ThemeTag = {
+		--			    Color = "Text"
+		--			}
+		--		}),
+		OldColorFrame,
 	})
 
-	local function CreateColorDialog()
-		local Dialog = require(Components.Dialog):Create()
-		Dialog.Title.Text = Colorpicker.Title
-		Dialog.Root.Size = UDim2.fromOffset(430, 330)
+	local NewDisplayFrame = New("Frame", {
+		BackgroundColor3 = Colorpicker.Default,
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 0,
+		ZIndex = 9,
+	}, {
+		New("UICorner", {
+			CornerRadius = UDim.new(0, 8),
+		}),
+	})
 
-		local Hue, Sat, Vib = Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib
-		local Transparency = Colorpicker.Transparency
-
-		local function CreateInput()
-			local Box = require(Components.Textbox)()
-			Box.Frame.Parent = Dialog.Root
-			Box.Frame.Size = UDim2.new(0, 90, 0, 32)
-
-			return Box
-		end
-
-		local function CreateInputLabel(Text, Pos)
-			return New("TextLabel", {
-				FontFace = Font.new(
-					"rbxasset://fonts/families/GothamSSm.json",
-					Enum.FontWeight.Medium,
-					Enum.FontStyle.Normal
-				),
-				Text = Text,
-				TextColor3 = Color3.fromRGB(240, 240, 240),
-				TextSize = 13,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				Size = UDim2.new(1, 0, 0, 32),
-				Position = Pos,
-				BackgroundTransparency = 1,
-				Parent = Dialog.Root,
-				ThemeTag = {
-					TextColor3 = "Text",
-				},
-			})
-		end
-
-		local function GetRGB()
-			local Value = Color3.fromHSV(Hue, Sat, Vib)
-			return { R = math.floor(Value.r * 255), G = math.floor(Value.g * 255), B = math.floor(Value.b * 255) }
-		end
-
-		local SatCursor = New("ImageLabel", {
-			Size = UDim2.new(0, 18, 0, 18),
-			ScaleType = Enum.ScaleType.Fit,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			Image = "http://www.roblox.com/asset/?id=4805639000",
-		})
-
-		local SatVibMap = New("ImageLabel", {
-			Size = UDim2.fromOffset(180, 160),
-			Position = UDim2.fromOffset(20, 55),
-			Image = "rbxassetid://4155801252",
-			BackgroundColor3 = Colorpicker.Value,
-			BackgroundTransparency = 0,
-			Parent = Dialog.Root,
-		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 4),
-			}),
-			SatCursor,
-		})
-
-		local OldColorFrame = New("Frame", {
-			BackgroundColor3 = Colorpicker.Value,
-			Size = UDim2.fromScale(1, 1),
-			BackgroundTransparency = Colorpicker.Transparency,
-		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 4),
-			}),
-		})
-
-		local OldColorFrameChecker = New("ImageLabel", {
-			Image = "http://www.roblox.com/asset/?id=14204231522",
-			ImageTransparency = 0.45,
-			ScaleType = Enum.ScaleType.Tile,
-			TileSize = UDim2.fromOffset(40, 40),
-			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(112, 220),
-			Size = UDim2.fromOffset(88, 24),
-			Parent = Dialog.Root,
-		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 4),
-			}),
-			New("UIStroke", {
-				Thickness = 2,
-				Transparency = 0.75,
-			}),
-			OldColorFrame,
-		})
-
-		local DialogDisplayFrame = New("Frame", {
-			BackgroundColor3 = Colorpicker.Value,
-			Size = UDim2.fromScale(1, 1),
-			BackgroundTransparency = 0,
-		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 4),
-			}),
-		})
-
-		local DialogDisplayFrameChecker = New("ImageLabel", {
-			Image = "http://www.roblox.com/asset/?id=14204231522",
-			ImageTransparency = 0.45,
-			ScaleType = Enum.ScaleType.Tile,
-			TileSize = UDim2.fromOffset(40, 40),
-			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(20, 220),
-			Size = UDim2.fromOffset(88, 24),
-			Parent = Dialog.Root,
-		}, {
-			New("UICorner", {
-				CornerRadius = UDim.new(0, 4),
-			}),
-			New("UIStroke", {
-				Thickness = 2,
-				Transparency = 0.75,
-			}),
-			DialogDisplayFrame,
-		})
-
-		local SequenceTable = {}
-
-		for Color = 0, 1, 0.1 do
-			table.insert(SequenceTable, ColorSequenceKeypoint.new(Color, Color3.fromHSV(Color, 1, 1)))
-		end
-
-		local HueSliderGradient = New("UIGradient", {
-			Color = ColorSequence.new(SequenceTable),
-			Rotation = 90,
-		})
-
-		local HueDragHolder = New("Frame", {
-			Size = UDim2.new(1, 0, 1, -10),
-			Position = UDim2.fromOffset(0, 5),
-			BackgroundTransparency = 1,
-		})
-
-		local HueDrag = New("ImageLabel", {
-			Size = UDim2.fromOffset(14, 14),
-			Image = "http://www.roblox.com/asset/?id=12266946128",
-			Parent = HueDragHolder,
+	local NewDisplayFrameChecker = New("ImageLabel", {
+		Image = "http://www.roblox.com/asset/?id=14204231522",
+		ImageTransparency = 0.45,
+		ScaleType = Enum.ScaleType.Tile,
+		TileSize = UDim2.fromOffset(40, 40),
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 40 + 182 - 24 + 10 + Colorpicker.TextPadding),
+		Size = UDim2.fromOffset(75, 24),
+		Parent = ColorpickerFrame.UIElements.Main,
+	}, {
+		New("UICorner", {
+			CornerRadius = UDim.new(0, 8),
+		}),
+		--		New("UIStroke", {
+		--			Thickness = 1,
+		--			Transparency = 0.8,
+		--			ThemeTag = {
+		--			    Color = "Text"
+		--			}
+		--		}),
+		Creator.NewRoundFrame(8, "SquircleOutline", {
 			ThemeTag = {
-				ImageColor3 = "DialogInput",
+				ImageColor3 = "Outline",
 			},
+			Size = UDim2.new(1, 0, 1, 0),
+			ImageTransparency = 0.85,
+			ZIndex = 99999,
+		}, {
+			New("UIGradient", {
+				Rotation = 60,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255)),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0.0, 0.1),
+					NumberSequenceKeypoint.new(0.5, 1),
+					NumberSequenceKeypoint.new(1.0, 0.1),
+				}),
+			}),
+		}),
+		NewDisplayFrame,
+	})
+
+	local SequenceTable = {}
+
+	for Color = 0, 1, 0.1 do
+		table.insert(SequenceTable, ColorSequenceKeypoint.new(Color, Color3.fromHSV(Color, 1, 1)))
+	end
+
+	local HueSliderGradient = New("UIGradient", {
+		Color = ColorSequence.new(SequenceTable),
+		Rotation = 90,
+	})
+
+	local HueDrag = New("Frame", {
+		Size = UDim2.new(0, 14, 0, 14),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0, 0),
+		Parent = HueDragHolder,
+		--Image = "rbxassetid://18747052224",
+		--ScaleType = "Crop",
+		BackgroundColor3 = Colorpicker.Default,
+	}, {
+		New("UIStroke", {
+			Thickness = 2,
+			Transparency = 0.1,
+			ThemeTag = {
+				Color = "Text",
+			},
+		}),
+		New("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+	})
+
+	local HueSlider = New("Frame", {
+		Size = UDim2.fromOffset(6, 182 + 10),
+		Position = UDim2.fromOffset(160 + 10 + 10, 40 + Colorpicker.TextPadding),
+		Parent = ColorpickerFrame.UIElements.Main,
+	}, {
+		New("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+		HueSliderGradient,
+		HueDragHolder,
+	})
+
+	local function CreateNewInput(Title, Value)
+		local InputFrame = CreateInput(Title, nil, Colorpicker.UIElements.Inputs, nil, nil, nil, nil, nil, true)
+
+		New("TextLabel", {
+			BackgroundTransparency = 1,
+			TextTransparency = 0.4,
+			TextSize = 17,
+			FontFace = Font.new(Creator.Font, Enum.FontWeight.Regular),
+			AutomaticSize = "XY",
+			ThemeTag = {
+				TextColor3 = "Placeholder",
+			},
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Parent = InputFrame.Frame,
+			Text = Title,
 		})
 
-		local HueSlider = New("Frame", {
-			Size = UDim2.fromOffset(12, 190),
-			Position = UDim2.fromOffset(210, 55),
-			Parent = Dialog.Root,
+		New("UIScale", {
+			Parent = InputFrame,
+			Scale = 0.85,
+		})
+
+		InputFrame.Frame.Frame.TextBox.Text = Value
+		InputFrame.Size = UDim2.new(0, 30 * 5, 0, 42)
+
+		return InputFrame
+	end
+
+	local function ToRGB(color)
+		return {
+			R = math.floor(color.R * 255),
+			G = math.floor(color.G * 255),
+			B = math.floor(color.B * 255),
+		}
+	end
+
+	local HexInput = CreateNewInput("Hex", "#" .. Colorpicker.Default:ToHex())
+
+	local RedInput = CreateNewInput("Red", ToRGB(Colorpicker.Default)["R"])
+	local GreenInput = CreateNewInput("Green", ToRGB(Colorpicker.Default)["G"])
+	local BlueInput = CreateNewInput("Blue", ToRGB(Colorpicker.Default)["B"])
+	local AlphaInput
+	if IsTransparency then
+		AlphaInput = CreateNewInput("Alpha", ((1 - Colorpicker.Transparency) * 100) .. "%")
+	end
+
+	local ButtonsContent = New("Frame", {
+		Size = UDim2.new(0, 0, 0, 40),
+		AutomaticSize = "Y",
+		Position = UDim2.new(0, 0, 0, 40 + 8 + 182 + 24 + Colorpicker.TextPadding),
+		BackgroundTransparency = 1,
+		Parent = ColorpickerFrame.UIElements.Main,
+		LayoutOrder = 4,
+	}, {
+		New("UIListLayout", {
+			Padding = UDim.new(0, 6),
+			FillDirection = "Horizontal",
+			HorizontalAlignment = "Right",
+		}),
+		-- New("UIPadding", {
+		--         PaddingTop = UDim.new(0, Colorpicker.TextPadding/2),
+		--         PaddingLeft = UDim.new(0, Colorpicker.TextPadding/2),
+		--         PaddingRight = UDim.new(0, Colorpicker.TextPadding/2),
+		--         PaddingBottom = UDim.new(0, Colorpicker.TextPadding/2),
+		--     })
+	})
+
+	Creator.AddSignal(ColorpickerFrame.UIElements.Main:GetPropertyChangedSignal("AbsoluteSize"), function()
+		Colorpicker.UIElements.Title.Size = UDim2.new(
+			0,
+			ColorpickerFrame.UIElements.Main.AbsoluteSize.X / Config.UIScale - (ColorpickerFrame.UIPadding * 2),
+			0,
+			0
+		)
+		ButtonsContent.Size = UDim2.new(
+			0,
+			ColorpickerFrame.UIElements.Main.AbsoluteSize.X / Config.UIScale - ColorpickerFrame.UIPadding * 2,
+			0,
+			40
+		)
+	end)
+
+	local Buttons = {
+		{
+			Title = "Cancel",
+			Variant = "Secondary",
+			Callback = function()
+				Config.IsShowed = false
+				for _, Conn in next, Connections do
+					Conn:Disconnect()
+				end
+				Connections = {}
+			end,
+		},
+		{
+			Title = "Apply",
+			--Icon = "chevron-right",
+			Variant = "Primary",
+			Callback = function()
+				Config.IsShowed = false
+				for _, Conn in next, Connections do
+					Conn:Disconnect()
+				end
+				Connections = {}
+
+				OnApply(Color3.fromHSV(Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib), Colorpicker.Transparency)
+			end,
+		},
+	}
+
+	for _, Button in next, Buttons do
+		local ButtonFrame = CreateButton(
+			Button.Title,
+			Button.Icon,
+			Button.Callback,
+			Button.Variant,
+			ButtonsContent,
+			ColorpickerFrame,
+			true
+		)
+		ButtonFrame.Size = UDim2.new(0.5, -3, 0, 40)
+		ButtonFrame.AutomaticSize = "None"
+	end
+
+	local TransparencySlider, TransparencyDrag, TransparencyColor
+	if IsTransparency then
+		local TransparencyDragHolder = New("Frame", {
+			Size = UDim2.new(1, 0, 1, 0),
+			Position = UDim2.fromOffset(0, 0),
+			BackgroundTransparency = 1,
+		})
+
+		TransparencyDrag = New("ImageLabel", {
+			Size = UDim2.new(0, 14, 0, 14),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0, 0),
+			ThemeTag = {
+				BackgroundColor3 = "Text",
+			},
+			Parent = TransparencyDragHolder,
+		}, {
+			New("UIStroke", {
+				Thickness = 2,
+				Transparency = 0.1,
+				ThemeTag = {
+					Color = "Text",
+				},
+			}),
+			New("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		})
+
+		TransparencyColor = New("Frame", {
+			Size = UDim2.fromScale(1, 1),
+		}, {
+			New("UIGradient", {
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0),
+					NumberSequenceKeypoint.new(1, 1),
+				}),
+				Rotation = 270,
+			}),
+			New("UICorner", {
+				CornerRadius = UDim.new(0, 6),
+			}),
+		})
+
+		TransparencySlider = New("Frame", {
+			Size = UDim2.fromOffset(6, 182 + 10),
+			Position = UDim2.fromOffset(160 + 10 + 10 + 10 + 10 + 10, 40 + Colorpicker.TextPadding),
+			Parent = ColorpickerFrame.UIElements.Main,
+			BackgroundTransparency = 1,
 		}, {
 			New("UICorner", {
 				CornerRadius = UDim.new(1, 0),
 			}),
-			HueSliderGradient,
-			HueDragHolder,
-		})
-
-		local HexInput = CreateInput()
-		HexInput.Frame.Position = UDim2.fromOffset(Config.Transparency and 260 or 240, 55)
-		CreateInputLabel("Hex", UDim2.fromOffset(Config.Transparency and 360 or 340, 55))
-
-		local RedInput = CreateInput()
-		RedInput.Frame.Position = UDim2.fromOffset(Config.Transparency and 260 or 240, 95)
-		CreateInputLabel("Red", UDim2.fromOffset(Config.Transparency and 360 or 340, 95))
-
-		local GreenInput = CreateInput()
-		GreenInput.Frame.Position = UDim2.fromOffset(Config.Transparency and 260 or 240, 135)
-		CreateInputLabel("Green", UDim2.fromOffset(Config.Transparency and 360 or 340, 135))
-
-		local BlueInput = CreateInput()
-		BlueInput.Frame.Position = UDim2.fromOffset(Config.Transparency and 260 or 240, 175)
-		CreateInputLabel("Blue", UDim2.fromOffset(Config.Transparency and 360 or 340, 175))
-
-		local AlphaInput
-		if Config.Transparency then
-			AlphaInput = CreateInput()
-			AlphaInput.Frame.Position = UDim2.fromOffset(260, 215)
-			CreateInputLabel("Alpha", UDim2.fromOffset(360, 215))
-		end
-
-		local TransparencySlider, TransparencyDrag, TransparencyColor
-		if Config.Transparency then
-			local TransparencyDragHolder = New("Frame", {
-				Size = UDim2.new(1, 0, 1, -10),
-				Position = UDim2.fromOffset(0, 5),
+			New("ImageLabel", {
+				Image = "rbxassetid://14204231522",
+				ImageTransparency = 0.45,
+				ScaleType = Enum.ScaleType.Tile,
+				TileSize = UDim2.fromOffset(40, 40),
 				BackgroundTransparency = 1,
-			})
-
-			TransparencyDrag = New("ImageLabel", {
-				Size = UDim2.fromOffset(14, 14),
-				Image = "http://www.roblox.com/asset/?id=12266946128",
-				Parent = TransparencyDragHolder,
-				ThemeTag = {
-					ImageColor3 = "DialogInput",
-				},
-			})
-
-			TransparencyColor = New("Frame", {
 				Size = UDim2.fromScale(1, 1),
 			}, {
-				New("UIGradient", {
-					Transparency = NumberSequence.new({
-						NumberSequenceKeypoint.new(0, 0),
-						NumberSequenceKeypoint.new(1, 1),
-					}),
-					Rotation = 270,
-				}),
 				New("UICorner", {
 					CornerRadius = UDim.new(1, 0),
 				}),
-			})
+			}),
+			TransparencyColor,
+			TransparencyDragHolder,
+		})
+	end
 
-			TransparencySlider = New("Frame", {
-				Size = UDim2.fromOffset(12, 190),
-				Position = UDim2.fromOffset(230, 55),
-				Parent = Dialog.Root,
-				BackgroundTransparency = 1,
-			}, {
-				New("UICorner", {
-					CornerRadius = UDim.new(1, 0),
-				}),
-				New("ImageLabel", {
-					Image = "http://www.roblox.com/asset/?id=14204231522",
-					ImageTransparency = 0.45,
-					ScaleType = Enum.ScaleType.Tile,
-					TileSize = UDim2.fromOffset(40, 40),
-					BackgroundTransparency = 1,
-					Size = UDim2.fromScale(1, 1),
-					Parent = Dialog.Root,
-				}, {
-					New("UICorner", {
-						CornerRadius = UDim.new(1, 0),
-					}),
-				}),
-				TransparencyColor,
-				TransparencyDragHolder,
-			})
+	function Colorpicker:Round(Number, Factor)
+		if Factor == 0 then
+			return math.floor(Number)
+		end
+		Number = tostring(Number)
+		return Number:find("%.") and tonumber(Number:sub(1, Number:find("%.") + Factor)) or Number
+	end
+
+	function Colorpicker:Update(color, transparency)
+		if color then
+			Hue, Sat, Vib = Color3.toHSV(color)
+		else
+			Hue, Sat, Vib = Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib
 		end
 
-		local function Display()
-			SatVibMap.BackgroundColor3 = Color3.fromHSV(Hue, 1, 1)
-			HueDrag.Position = UDim2.new(0, -1, Hue, -6)
-			SatCursor.Position = UDim2.new(Sat, 0, 1 - Vib, 0)
-			DialogDisplayFrame.BackgroundColor3 = Color3.fromHSV(Hue, Sat, Vib)
+		Colorpicker.UIElements.SatVibMap.BackgroundColor3 = Color3.fromHSV(Hue, 1, 1)
+		SatCursor.Position = UDim2.new(Sat, 0, 1 - Vib, 0)
+		SatCursor.BackgroundColor3 = Color3.fromHSV(Hue, Sat, Vib)
+		NewDisplayFrame.BackgroundColor3 = Color3.fromHSV(Hue, Sat, Vib)
+		HueDrag.BackgroundColor3 = Color3.fromHSV(Hue, 1, 1)
+		HueDrag.Position = UDim2.new(0.5, 0, Hue, 0)
 
-			HexInput.Input.Text = "#" .. Color3.fromHSV(Hue, Sat, Vib):ToHex()
-			RedInput.Input.Text = GetRGB()["R"]
-			GreenInput.Input.Text = GetRGB()["G"]
-			BlueInput.Input.Text = GetRGB()["B"]
+		HexInput.Frame.Frame.TextBox.Text = "#" .. Color3.fromHSV(Hue, Sat, Vib):ToHex()
+		RedInput.Frame.Frame.TextBox.Text = ToRGB(Color3.fromHSV(Hue, Sat, Vib))["R"]
+		GreenInput.Frame.Frame.TextBox.Text = ToRGB(Color3.fromHSV(Hue, Sat, Vib))["G"]
+		BlueInput.Frame.Frame.TextBox.Text = ToRGB(Color3.fromHSV(Hue, Sat, Vib))["B"]
 
-			if Config.Transparency then
-				TransparencyColor.BackgroundColor3 = Color3.fromHSV(Hue, Sat, Vib)
-				DialogDisplayFrame.BackgroundTransparency = Transparency
-				TransparencyDrag.Position = UDim2.new(0, -1, 1 - Transparency, -6)
-				AlphaInput.Input.Text = require(Root):Round((1 - Transparency) * 100, 0) .. "%"
-			end
+		if transparency or IsTransparency then
+			NewDisplayFrame.BackgroundTransparency = Colorpicker.Transparency or transparency
+			TransparencyColor.BackgroundColor3 = Color3.fromHSV(Hue, Sat, Vib)
+			TransparencyDrag.BackgroundColor3 = Color3.fromHSV(Hue, Sat, Vib)
+			TransparencyDrag.BackgroundTransparency = Colorpicker.Transparency or transparency
+			TransparencyDrag.Position = UDim2.new(0.5, 0, 1 - Colorpicker.Transparency or transparency, 0)
+			AlphaInput.Frame.Frame.TextBox.Text = Colorpicker:Round(
+				(1 - Colorpicker.Transparency or transparency) * 100,
+				0
+			) .. "%"
 		end
+	end
 
-		Creator.AddSignal(HexInput.Input.FocusLost, function(Enter)
+	Colorpicker:Update(Colorpicker.Default, Colorpicker.Transparency)
+
+	local function GetRGB()
+		local Value = Color3.fromHSV(Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib)
+		return { R = math.floor(Value.r * 255), G = math.floor(Value.g * 255), B = math.floor(Value.b * 255) }
+	end
+
+	-- oh no!
+
+	local function clamp(val, min, max)
+		return math.clamp(tonumber(val) or 0, min, max)
+	end
+
+	table.insert(
+		Connections,
+		Creator.AddSignal(HexInput.Frame.Frame.TextBox.FocusLost, function(Enter)
 			if Enter then
-				local Success, Result = pcall(Color3.fromHex, HexInput.Input.Text)
+				local hex = HexInput.Frame.Frame.TextBox.Text:gsub("#", "")
+				local Success, Result = pcall(Color3.fromHex, hex)
 				if Success and typeof(Result) == "Color3" then
-					Hue, Sat, Vib = Color3.toHSV(Result)
+					Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib = Color3.toHSV(Result)
+					Colorpicker:Update()
+					Colorpicker.Default = Result
 				end
 			end
-			Display()
 		end)
+	)
 
-		Creator.AddSignal(RedInput.Input.FocusLost, function(Enter)
+	local function updateColorFromInput(inputBox, component)
+		Creator.AddSignal(inputBox.Frame.Frame.TextBox.FocusLost, function(Enter)
 			if Enter then
-				local CurrentColor = GetRGB()
-				local Success, Result = pcall(Color3.fromRGB, RedInput.Input.Text, CurrentColor["G"], CurrentColor["B"])
-				if Success and typeof(Result) == "Color3" then
-					if tonumber(RedInput.Input.Text) <= 255 then
-						Hue, Sat, Vib = Color3.toHSV(Result)
-					end
-				end
-			end
-			Display()
-		end)
+				local textBox = inputBox.Frame.Frame.TextBox
+				local current = GetRGB()
+				local clamped = clamp(textBox.Text, 0, 255)
+				textBox.Text = tostring(clamped)
 
-		Creator.AddSignal(GreenInput.Input.FocusLost, function(Enter)
+				current[component] = clamped
+				local Result = Color3.fromRGB(current.R, current.G, current.B)
+				Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib = Color3.toHSV(Result)
+				Colorpicker:Update()
+			end
+		end)
+	end
+
+	updateColorFromInput(RedInput, "R")
+	updateColorFromInput(GreenInput, "G")
+	updateColorFromInput(BlueInput, "B")
+
+	if IsTransparency then
+		Creator.AddSignal(AlphaInput.Frame.Frame.TextBox.FocusLost, function(Enter)
 			if Enter then
-				local CurrentColor = GetRGB()
-				local Success, Result =
-					pcall(Color3.fromRGB, CurrentColor["R"], GreenInput.Input.Text, CurrentColor["B"])
-				if Success and typeof(Result) == "Color3" then
-					if tonumber(GreenInput.Input.Text) <= 255 then
-						Hue, Sat, Vib = Color3.toHSV(Result)
-					end
-				end
+				local textBox = AlphaInput.Frame.Frame.TextBox
+				local clamped = clamp(textBox.Text, 0, 100)
+				textBox.Text = tostring(clamped)
+
+				Colorpicker.Transparency = 1 - clamped * 0.01
+				Colorpicker:Update(nil, Colorpicker.Transparency)
 			end
-			Display()
 		end)
+	end
 
-		Creator.AddSignal(BlueInput.Input.FocusLost, function(Enter)
-			if Enter then
-				local CurrentColor = GetRGB()
-				local Success, Result =
-					pcall(Color3.fromRGB, CurrentColor["R"], CurrentColor["G"], BlueInput.Input.Text)
-				if Success and typeof(Result) == "Color3" then
-					if tonumber(BlueInput.Input.Text) <= 255 then
-						Hue, Sat, Vib = Color3.toHSV(Result)
-					end
-				end
-			end
-			Display()
-		end)
+	-- fu
 
-		if Config.Transparency then
-			Creator.AddSignal(AlphaInput.Input.FocusLost, function(Enter)
-				if Enter then
-					pcall(function()
-						local Value = tonumber(AlphaInput.Input.Text)
-						if Value >= 0 and Value <= 100 then
-							Transparency = 1 - Value * 0.01
-						end
-					end)
-				end
-				Display()
-			end)
-		end
+	local function UpdateSatVib(SatVibMap, Colorpicker)
+		local MinX = SatVibMap.AbsolutePosition.X
+		local MaxX = MinX + SatVibMap.AbsoluteSize.X
+		local MinY = SatVibMap.AbsolutePosition.Y
+		local MaxY = MinY + SatVibMap.AbsoluteSize.Y
 
-		Creator.AddSignal(SatVibMap.InputBegan, function(Input)
+		local MouseX = math.clamp(Mouse.X, MinX, MaxX)
+		local MouseY = math.clamp(Mouse.Y, MinY, MaxY)
+
+		Colorpicker.Sat = (MouseX - MinX) / (MaxX - MinX)
+		Colorpicker.Vib = 1 - ((MouseY - MinY) / (MaxY - MinY))
+
+		Colorpicker:Update()
+	end
+
+	local function UpdateHue(HueSlider, Colorpicker)
+		local MinY = HueSlider.AbsolutePosition.Y
+		local MaxY = MinY + HueSlider.AbsoluteSize.Y
+
+		local MouseY = math.clamp(Mouse.Y, MinY, MaxY)
+
+		Colorpicker.Hue = (MouseY - MinY) / (MaxY - MinY)
+
+		Colorpicker:Update()
+	end
+
+	local function UpdateTransparency(TransparencySlider, Colorpicker)
+		local MinY = TransparencySlider.AbsolutePosition.Y
+		local MaxY = MinY + TransparencySlider.AbsoluteSize.Y
+
+		local MouseY = math.clamp(Mouse.Y, MinY, MaxY)
+
+		Colorpicker.Transparency = 1 - ((MouseY - MinY) / (MaxY - MinY))
+
+		Colorpicker:Update()
+	end
+
+	local CurInput = WindUI.GenerateGUID()
+
+	table.insert(
+		Connections,
+		UserInputService.InputChanged:Connect(function(input)
 			if
-				Input.UserInputType == Enum.UserInputType.MouseButton1
-				or Input.UserInputType == Enum.UserInputType.Touch
+				input.UserInputType ~= Enum.UserInputType.MouseMovement
+				and input.UserInputType ~= Enum.UserInputType.Touch
 			then
-				while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-					local MinX = SatVibMap.AbsolutePosition.X
-					local MaxX = MinX + SatVibMap.AbsoluteSize.X
-					local MouseX = math.clamp(Mouse.X, MinX, MaxX)
+				return
+			end
 
-					local MinY = SatVibMap.AbsolutePosition.Y
-					local MaxY = MinY + SatVibMap.AbsoluteSize.Y
-					local MouseY = math.clamp(Mouse.Y, MinY, MaxY)
-
-					Sat = (MouseX - MinX) / (MaxX - MinX)
-					Vib = 1 - ((MouseY - MinY) / (MaxY - MinY))
-					Display()
-
-					RenderStepped:Wait()
-				end
+			if ActiveSlider == "SatVib" then
+				UpdateSatVib(Colorpicker.UIElements.SatVibMap, Colorpicker)
+			elseif ActiveSlider == "Hue" then
+				UpdateHue(HueSlider, Colorpicker)
+			elseif ActiveSlider == "Transparency" then
+				UpdateTransparency(TransparencySlider, Colorpicker)
 			end
 		end)
+	)
 
-		Creator.AddSignal(HueSlider.InputBegan, function(Input)
+	table.insert(
+		Connections,
+		Colorpicker.UIElements.SatVibMap.InputBegan:Connect(function(input)
 			if
-				Input.UserInputType == Enum.UserInputType.MouseButton1
-				or Input.UserInputType == Enum.UserInputType.Touch
+				input.UserInputType ~= Enum.UserInputType.MouseButton1
+				and input.UserInputType ~= Enum.UserInputType.Touch
 			then
-				while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-					local MinY = HueSlider.AbsolutePosition.Y
-					local MaxY = MinY + HueSlider.AbsoluteSize.Y
-					local MouseY = math.clamp(Mouse.Y, MinY, MaxY)
-
-					Hue = ((MouseY - MinY) / (MaxY - MinY))
-					Display()
-
-					RenderStepped:Wait()
-				end
+				return
 			end
+
+			if WindUI.CurrentInput and WindUI.CurrentInput ~= CurInput then
+				return
+			end
+			WindUI.CurrentInput = CurInput
+
+			if ActiveSlider and ActiveSlider ~= "SatVib" then
+				return
+			end
+
+			ActiveSlider = "SatVib"
+
+			UpdateSatVib(Colorpicker.UIElements.SatVibMap, Colorpicker)
 		end)
+	)
 
-		if Config.Transparency then
-			Creator.AddSignal(TransparencySlider.InputBegan, function(Input)
-				if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-					while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-						local MinY = TransparencySlider.AbsolutePosition.Y
-						local MaxY = MinY + TransparencySlider.AbsoluteSize.Y
-						local MouseY = math.clamp(Mouse.Y, MinY, MaxY)
+	table.insert(
+		Connections,
+		HueSlider.InputBegan:Connect(function(input)
+			if
+				input.UserInputType ~= Enum.UserInputType.MouseButton1
+				and input.UserInputType ~= Enum.UserInputType.Touch
+			then
+				return
+			end
 
-						Transparency = 1 - ((MouseY - MinY) / (MaxY - MinY))
-						Display()
+			if WindUI.CurrentInput and WindUI.CurrentInput ~= CurInput then
+				return
+			end
+			WindUI.CurrentInput = CurInput
 
-						RenderStepped:Wait()
-					end
+			if ActiveSlider and ActiveSlider ~= "Hue" then
+				return
+			end
+
+			ActiveSlider = "Hue"
+
+			UpdateHue(HueSlider, Colorpicker)
+		end)
+	)
+
+	if TransparencySlider then
+		table.insert(
+			Connections,
+			TransparencySlider.InputBegan:Connect(function(input)
+				if
+					input.UserInputType ~= Enum.UserInputType.MouseButton1
+					and input.UserInputType ~= Enum.UserInputType.Touch
+				then
+					return
 				end
+
+				if WindUI.CurrentInput and WindUI.CurrentInput ~= CurInput then
+					return
+				end
+				WindUI.CurrentInput = CurInput
+
+				if ActiveSlider and ActiveSlider ~= "Transparency" then
+					return
+				end
+
+				ActiveSlider = "Transparency"
+
+				UpdateTransparency(TransparencySlider, Colorpicker)
 			end)
-		end
+		)
+	end
 
-		Display()
+	table.insert(
+		Connections,
+		UserInputService.InputEnded:Connect(function(input)
+			ActiveSlider = nil
 
-		Dialog:Button("Done", function()
-			Colorpicker:SetValue({ Hue, Sat, Vib }, Transparency)
+			if WindUI.CurrentInput and WindUI.CurrentInput ~= CurInput then
+				return
+			end
+			WindUI.CurrentInput = nil
 		end)
-		Dialog:Button("Cancel")
-		Dialog:Open()
+	)
+
+	return Colorpicker
+end
+
+function Element:New(Config)
+	local Colorpicker = {
+		__type = "Colorpicker",
+		Title = Config.Title or "Colorpicker",
+		Desc = Config.Desc or nil,
+		Locked = Config.Locked or false,
+		LockedTitle = Config.LockedTitle,
+		Default = Config.Default or Color3.new(1, 1, 1),
+		Callback = Config.Callback or function() end,
+		--Window = Config.Window,
+		UIScale = Config.UIScale,
+		Transparency = Config.Transparency,
+		UIElements = {},
+
+		IsShowed = false,
+	}
+
+	local CanCallback = true
+
+	--if Config.Window.NewElements then Element.UICorner = 14 end
+
+	Colorpicker.ColorpickerFrame = require("../components/window/Element")({
+		Title = Colorpicker.Title,
+		Desc = Colorpicker.Desc,
+		Parent = Config.Parent,
+		TextOffset = 40,
+		Hover = false,
+		Tab = Config.Tab,
+		Index = Config.Index,
+		Window = Config.Window,
+		ElementTable = Colorpicker,
+		ParentConfig = Config,
+		Tags = Config.Tags,
+	})
+
+	Colorpicker.UIElements.Colorpicker = Creator.NewRoundFrame(Element.UICorner, "Squircle", {
+		ImageTransparency = 0,
+		Active = true,
+		ImageColor3 = Colorpicker.Default,
+		Parent = Colorpicker.ColorpickerFrame.UIElements.Main,
+		Size = UDim2.new(0, 26, 0, 26),
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0),
+		ZIndex = 2,
+	}, {
+		Creator.NewRoundFrame(Element.UICorner, "SquircleGlass", {
+			Size = UDim2.new(1, 0, 1, 0),
+			ThemeTag = {
+				ImageColor3 = "Outline",
+			},
+			ImageTransparency = 0.55,
+		}),
+	}, true)
+
+	function Colorpicker:Lock()
+		Colorpicker.Locked = true
+		CanCallback = false
+		return Colorpicker.ColorpickerFrame:Lock(Colorpicker.LockedTitle)
+	end
+	function Colorpicker:Unlock()
+		Colorpicker.Locked = false
+		CanCallback = true
+		return Colorpicker.ColorpickerFrame:Unlock()
 	end
 
-	function Colorpicker:Display()
-		Colorpicker.Value = Color3.fromHSV(Colorpicker.Hue, Colorpicker.Sat, Colorpicker.Vib)
-
-		DisplayFrameColor.BackgroundColor3 = Colorpicker.Value
-		DisplayFrameColor.BackgroundTransparency = Colorpicker.Transparency
-
-		Element.Library:SafeCallback(Colorpicker.Callback, Colorpicker.Value)
-		Element.Library:SafeCallback(Colorpicker.Changed, Colorpicker.Value)
+	if Colorpicker.Locked then
+		Colorpicker:Lock()
 	end
 
-	function Colorpicker:SetValue(HSV, Transparency)
-		local Color = Color3.fromHSV(HSV[1], HSV[2], HSV[3])
-
-		Colorpicker.Transparency = Transparency or 0
-		Colorpicker:SetHSVFromRGB(Color)
-		Colorpicker:Display()
+	function Colorpicker:Update(Color, Transparency)
+		Colorpicker.UIElements.Colorpicker.ImageTransparency = Transparency or 0
+		Colorpicker.UIElements.Colorpicker.ImageColor3 = Color
+		Colorpicker.Default = Color
+		if Transparency then
+			Colorpicker.Transparency = Transparency
+		end
 	end
 
-	function Colorpicker:SetValueRGB(Color, Transparency)
-		Colorpicker.Transparency = Transparency or 0
-		Colorpicker:SetHSVFromRGB(Color)
-		Colorpicker:Display()
+	function Colorpicker:Set(c, t)
+		return Colorpicker:Update(c, t)
 	end
 
-	function Colorpicker:OnChanged(Func)
-		Colorpicker.Changed = Func
-		Func(Colorpicker.Value)
-	end
+	Creator.AddSignal(Colorpicker.UIElements.Colorpicker.MouseButton1Click, function()
+		if CanCallback and not Colorpicker.IsShowed then
+			Colorpicker.IsShowed = true
 
-	function Colorpicker:Destroy()
-		ColorpickerFrame:Destroy()
-		Library.Options[Idx] = nil
-	end
-
-	Creator.AddSignal(ColorpickerFrame.Frame.MouseButton1Click, function()
-		CreateColorDialog()
+			Element:Colorpicker(Colorpicker, Config.Window, Config.WindUI, function(color, transparency)
+				Colorpicker:Update(color, transparency)
+				Colorpicker.Default = color
+				Colorpicker.Transparency = transparency
+				Creator.SafeCallback(Colorpicker.Callback, color, transparency)
+			end).ColorpickerFrame
+				:Open()
+		end
 	end)
 
-	Colorpicker:Display()
-
-	Library.Options[Idx] = Colorpicker
-	return Colorpicker
+	return Colorpicker.__type, Colorpicker
 end
 
 return Element

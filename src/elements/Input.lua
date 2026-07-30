@@ -1,84 +1,109 @@
-local Root = script.Parent.Parent
-local Creator = require(Root.Creator)
-
+local Creator = require("../modules/Creator")
 local New = Creator.New
-local AddSignal = Creator.AddSignal
-local Components = Root.Components
+local Tween = Creator.Tween
 
-local Element = {}
-Element.__index = Element
-Element.__type = "Input"
+local Element = {
+	UICorner = 8,
+	UIPadding = 8,
+}
 
-function Element:New(Idx, Config)
-	local Library = self.Library
-	assert(Config.Title, "Input - Missing Title")
-	Config.Callback = Config.Callback or function() end
+local CreateButton = require("../components/ui/Button").New
+local CreateInput = require("../components/ui/Input").New
 
+function Element:New(Config)
 	local Input = {
-		Value = Config.Default or "",
-		Numeric = Config.Numeric or false,
-		Finished = Config.Finished or false,
-		Callback = Config.Callback or function(Value) end,
-		Type = "Input",
+		__type = "Input",
+		Title = Config.Title or "Input",
+		Desc = Config.Desc or nil,
+		Type = Config.Type or "Input", -- Input or Textarea
+		Locked = Config.Locked or false,
+		LockedTitle = Config.LockedTitle,
+		InputIcon = Config.InputIcon or false,
+		Placeholder = Config.Placeholder or "Enter Text...",
+		Value = Config.Value or "",
+		Callback = Config.Callback or function() end,
+		ClearTextOnFocus = Config.ClearTextOnFocus or false,
+		UIElements = {},
+
+		Width = 150,
 	}
 
-	local InputFrame = require(Components.Element)(Config.Title, Config.Description, self.Container, false)
+	local CanCallback = true
 
-	Input.SetTitle = InputFrame.SetTitle
-	Input.SetDesc = InputFrame.SetDesc
+	Input.InputFrame = require("../components/window/Element")({
+		Title = Input.Title,
+		Desc = Input.Desc,
+		Parent = Config.Parent,
+		TextOffset = Input.Width,
+		Hover = false,
+		Tab = Config.Tab,
+		Index = Config.Index,
+		Window = Config.Window,
+		ElementTable = Input,
+		ParentConfig = Config,
+		Tags = Config.Tags,
+	})
 
-	local Textbox = require(Components.Textbox)(InputFrame.Frame, true)
-	Textbox.Frame.Position = UDim2.new(1, -10, 0.5, 0)
-	Textbox.Frame.AnchorPoint = Vector2.new(1, 0.5)
-	Textbox.Frame.Size = UDim2.fromOffset(160, 30)
-	Textbox.Input.Text = Config.Default or ""
-	Textbox.Input.PlaceholderText = Config.Placeholder or ""
+	local InputComponent = CreateInput(
+		Input.Placeholder,
+		Input.InputIcon,
+		Input.Type == "Textarea" and Input.InputFrame.UIElements.Container or Input.InputFrame.UIElements.Main,
+		Input.Type,
+		function(v)
+			Input:Set(v, true)
+		end,
+		nil,
+		Config.Window.NewElements and 12 or 10,
+		Input.ClearTextOnFocus
+	)
 
-	local Box = Textbox.Input
-
-	function Input:SetValue(Text)
-		if Config.MaxLength and #Text > Config.MaxLength then
-			Text = Text:sub(1, Config.MaxLength)
-		end
-
-		if Input.Numeric then
-			if (not tonumber(Text)) and Text:len() > 0 then
-				Text = Input.Value
-			end
-		end
-
-		Input.Value = Text
-		Box.Text = Text
-
-		Library:SafeCallback(Input.Callback, Input.Value)
-		Library:SafeCallback(Input.Changed, Input.Value)
-	end
-
-	if Input.Finished then
-		AddSignal(Box.FocusLost, function(enter)
-			if not enter then
-				return
-			end
-			Input:SetValue(Box.Text)
-		end)
+	if Input.Type ~= "Textarea" then
+		InputComponent.Size = UDim2.new(0, Input.Width, 0, 36)
+		InputComponent.Position = UDim2.new(1, 0, Config.Window.NewElements and 0 or 0.5, 0)
+		InputComponent.AnchorPoint = Vector2.new(1, Config.Window.NewElements and 0 or 0.5)
 	else
-		AddSignal(Box:GetPropertyChangedSignal("Text"), function()
-			Input:SetValue(Box.Text)
-		end)
+		InputComponent.Size = UDim2.new(1, 0, 0, 42 + 56 + 50)
 	end
 
-	function Input:OnChanged(Func)
-		Input.Changed = Func
-		Func(Input.Value)
+	--[[New("UIScale", {
+		Parent = InputComponent,
+		Scale = 1,
+	})]]
+
+	function Input:Lock()
+		Input.Locked = true
+		CanCallback = false
+		return Input.InputFrame:Lock(Input.LockedTitle)
+	end
+	function Input:Unlock()
+		Input.Locked = false
+		CanCallback = true
+		return Input.InputFrame:Unlock()
 	end
 
-	function Input:Destroy()
-		InputFrame:Destroy()
-		Library.Options[Idx] = nil
+	function Input:Set(v, IsUserInput)
+		if CanCallback then
+			Input.Value = v
+			Creator.SafeCallback(Input.Callback, v)
+
+			if not IsUserInput then
+				InputComponent.Frame.Frame.TextBox.Text = v
+			end
+		end
 	end
 
-	Library.Options[Idx] = Input
-	return Input
+	function Input:SetPlaceholder(v)
+		InputComponent.Frame.Frame.TextBox.PlaceholderText = v
+		Input.Placeholder = v
+	end
+
+	Input:Set(Input.Value)
+
+	if Input.Locked then
+		Input:Lock()
+	end
+
+	return Input.__type, Input
 end
 
 return Element
